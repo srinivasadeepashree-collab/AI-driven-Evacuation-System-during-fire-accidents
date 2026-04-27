@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Ultimate AI Evacuation</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+<style>
+body{margin:0;overflow:hidden;font-family:Arial;}
+#panel{
+position:absolute;top:10px;right:10px;background:#fff;
+padding:10px;border-radius:10px;box-shadow:0 0 10px rgba(0,0,0,.3);
+}
+button{
+position:absolute;top:10px;left:10px;padding:10px;font-size:16px;
+}
+</style>
+</head>
+
+<body>
+
+<button onclick="startEvac()">Start Evacuation</button>
+
+<div id="panel">
+<b>Instruction:</b><br>
+<span id="instruction">Waiting...</span>
+</div>
+
+<script>
+
+let scene,camera,renderer;
+let people=[],exits=[],fires=[],arrows=[],smoke=[];
+let lastInstruction="";
+
+init(); animate();
+
+// ---------- INIT ----------
+function init(){
+
+scene=new THREE.Scene();
+scene.background=new THREE.Color(0xf0f0f0);
+
+camera=new THREE.PerspectiveCamera(60,window.innerWidth/window.innerHeight,0.1,1000);
+camera.position.set(0,30,0);
+camera.lookAt(0,0,0);
+
+renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(window.innerWidth,window.innerHeight);
+document.body.appendChild(renderer.domElement);
+
+let light=new THREE.DirectionalLight(0xffffff,1);
+light.position.set(0,20,10);
+scene.add(light);
+
+let floor=new THREE.Mesh(
+new THREE.PlaneGeometry(40,10),
+new THREE.MeshPhongMaterial({color:0xdddddd})
+);
+floor.rotation.x=-Math.PI/2;
+scene.add(floor);
+
+addWall(5); addWall(-5);
+
+// obstacles
+addRoom(-6,2); addRoom(0,2); addRoom(6,2);
+addRoom(-6,-2); addRoom(6,-2);
+
+// fire (two points)
+addFire(0,0); addFire(5,-2);
+
+// exits A, B safe; C danger
+addExit(-18,0,"A");
+addExit(18,0,"B");
+addExit(5,4,"C");
+
+// people
+for(let i=0;i<3;i++){
+addPerson(-15+i,(Math.random()*2-1)*2);
+}
+
+window.addEventListener("resize",resize);
+}
+
+function resize(){
+camera.aspect=window.innerWidth/window.innerHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(window.innerWidth,window.innerHeight);
+}
+
+// ---------- OBJECTS ----------
+function addWall(z){
+let w=new THREE.Mesh(
+new THREE.BoxGeometry(40,2,0.5),
+new THREE.MeshPhongMaterial({color:0x444444})
+);
+w.position.set(0,1,z);
+scene.add(w);
+}
+
+function addRoom(x,z){
+let r=new THREE.Mesh(
+new THREE.BoxGeometry(3,2,2),
+new THREE.MeshPhongMaterial({color:0x888888})
+);
+r.position.set(x,1,z);
+scene.add(r);
+}
+
+function addFire(x,z){
+let f=new THREE.Mesh(
+new THREE.BoxGeometry(2,1,2),
+new THREE.MeshPhongMaterial({color:0xff0000})
+);
+f.position.set(x,0.5,z);
+f.radius=2;
+scene.add(f);
+fires.push(f);
+}
+
+function addExit(x,z,label){
+let e=new THREE.Mesh(
+new THREE.BoxGeometry(1.5,1,1.5),
+new THREE.MeshPhongMaterial({color:0x00ff00})
+);
+e.position.set(x,0.5,z);
+e.label=label;
+scene.add(e);
+exits.push(e);
+}
+
+function addPerson(x,z){
+let p=new THREE.Mesh(
+new THREE.SphereGeometry(0.6,24,24),
+new THREE.MeshPhongMaterial({color:0x0000ff})
+);
+p.position.set(x,0.6,z);
+p.speed=0.04+Math.random()*0.04;
+p.path=[]; p.step=0; p.rerouted=false; p.finished=false;
+scene.add(p);
+people.push(p);
+}
+
+// ---------- VOICE ----------
+function speak(t){
+if(t!==lastInstruction){
+let msg=new SpeechSynthesisUtterance(t);
+speechSynthesis.speak(msg);
+document.getElementById("instruction").innerText=t;
+lastInstruction=t;
+}
+}
+
+// ---------- PATH ----------
+function computePath(p){
+
+// A & B safe (green), C danger (red)
+exits.forEach(e=>{
+if(e.label==="C") e.material.color.set(0xff0000);
+else e.material.color.set(0x00ff00);
+});
+
+// split people A/B
+let idx=people.indexOf(p);
+let exit = (idx%2===0)
+? exits.find(e=>e.label==="B")
+: exits.find(e=>e.label==="A");
+
+return [
+p.position.clone(),
+new THREE.Vector3(0,0.6,3),
+exit.position.clone()
+];
+}
+
+// ---------- ARROWS ----------
+function drawArrows(path){
+arrows.forEach(a=>scene.remove(a));
+arrows=[];
+path.forEach(pt=>{
+let a=new THREE.Mesh(
+new THREE.ConeGeometry(0.3,1,8),
+new THREE.MeshPhongMaterial({color:0x00aa00})
+);
+a.rotation.x=Math.PI/2;
+a.position.set(pt.x,0.2,pt.z);
+scene.add(a);
+arrows.push(a);
+});
+}
+
+// ---------- START ----------
+function startEvac(){
+    function startEvac(){
+
+// 🚨 INSTANT ALERT (NO DELAY + NO REDIRECT)
+navigator.sendBeacon("http://127.0.0.1:5000/send-alert");
+
+// Optional UI feedback
+document.getElementById("instruction").innerText = "Alerts sent. Evacuation started";
+
+// setup paths
+people.forEach(p=>{
+p.path=computePath(p);
+p.step=0;
+p.rerouted=false;
+p.finished=false;
+drawArrows(p.path);
+});
+
+speak("Go straight");
+}
+}
+
+
+
+
+// ---------- ANIMATE ----------
+function animate(){
+requestAnimationFrame(animate);
+
+// fire + light smoke
+fires.forEach(f=>{
+f.radius+=0.002;
+f.scale.set(f.radius,1,f.radius);
+
+if(Math.random()<0.05){
+let s=new THREE.Mesh(
+new THREE.SphereGeometry(0.2),
+new THREE.MeshBasicMaterial({color:0x555555,transparent:true,opacity:0.4})
+);
+s.position.copy(f.position);
+scene.add(s);
+smoke.push(s);
+}
+});
+
+smoke.forEach(s=>{
+s.position.y+=0.02;
+s.material.opacity-=0.003;
+});
+
+// move people
+people.forEach(p=>{
+
+if(p.finished) return;
+
+// snap to exit
+let finalTarget=p.path[p.path.length-1];
+if(p.position.distanceTo(finalTarget)<0.6){
+p.position.copy(finalTarget);
+speak("Exit reached");
+p.finished=true;
+return;
+}
+
+// reroute once
+if(!p.rerouted){
+let danger=fires.some(f=>p.position.distanceTo(f.position)<f.radius);
+if(danger){
+speak("Fire ahead, rerouting");
+p.path=computePath(p);
+p.step=0;
+p.rerouted=true;
+drawArrows(p.path);
+}
+}
+
+let target=p.path[Math.min(p.step+1,p.path.length-1)];
+let dir=target.clone().sub(p.position);
+
+// simple collision avoid
+people.forEach(o=>{
+if(o!==p && p.position.distanceTo(o.position)<1){
+p.position.x-=0.03;
+}
+});
+
+if(dir.length()<0.4){
+p.step++;
+speak("Continue");
+}else{
+p.position.add(dir.normalize().multiplyScalar(p.speed));
+}
+
+});
+
+renderer.render(scene,camera);
+}
+</script>
+</body>
+</html>
